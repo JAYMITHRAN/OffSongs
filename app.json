@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "OffSongs",
+    "slug": "offsongs-player",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#100C0E"
+    },
+    "newArchEnabled": false,
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.offsongs.player",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"],
+        "NSAppleMusicUsageDescription": "OffSongs reads your local music library to play it offline."
+      }
+    },
+    "android": {
+      "package": "com.offsongs.player",
+      "adaptiveIcon": {
+        "backgroundColor": "#100C0E"
+      },
+      "permissions": [
+        "READ_MEDIA_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "WAKE_LOCK"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": false,
+          "savePhotosPermission": false,
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6b1407c0-2cc8-4f93-a9c5-cc5d6c56a193"
+      }
+    }
+  }
+}
