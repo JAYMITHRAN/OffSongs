@@ -2,7 +2,7 @@
   "expo": {
     "name": "OffSongs",
     "slug": "offsongs",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -21,6 +21,7 @@
     },
     "android": {
       "package": "com.offsongs.player",
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#100C0E"
       },

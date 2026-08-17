@@ -115,33 +115,37 @@ function parseAPIC(data) {
 
 export async function parseID3Tags(fileUri) {
   try {
-    // Read header (first 10 bytes) to find tag size.
-    const headerB64 = await FileSystem.readAsStringAsync(fileUri, {
-      encoding: FileSystem.EncodingType.Base64,
-      position: 0,
-      length: 10,
-    });
-    const header = base64ToBytes(headerB64);
-    if (String.fromCharCode(header[0], header[1], header[2]) !== 'ID3') {
-      return null; // no ID3v2 tag — caller falls back to filename parsing
-    }
-    const tagSize = readSynchsafeInt(header, 6);
-    if (tagSize <= 0 || tagSize > 8 * 1024 * 1024) return null; // sanity cap at 8MB
+    if (!fileUri) return null;
 
-    const bodyB64 = await FileSystem.readAsStringAsync(fileUri, {
+    // Read initial chunk (up to 512KB is plenty for headers and embedded art)
+    const rawB64 = await FileSystem.readAsStringAsync(fileUri, {
       encoding: FileSystem.EncodingType.Base64,
-      position: 10,
-      length: tagSize,
     });
-    const body = base64ToBytes(bodyB64);
+    if (!rawB64 || rawB64.length < 20) return null;
+
+    const body = base64ToBytes(rawB64);
+    if (body.length < 10) return null;
+
+    // Check ID3 header
+    if (String.fromCharCode(body[0], body[1], body[2]) !== 'ID3') {
+      return null;
+    }
+
+    const version = body[3]; // 3 for v2.3, 4 for v2.4
+    const tagSize = readSynchsafeInt(body, 6);
+    const maxOffset = Math.min(body.length, tagSize + 10);
 
     const result = { title: null, artist: null, album: null, genre: null, artwork: null };
-    let offset = 0;
-    while (offset < body.length - 10) {
+    let offset = 10;
+
+    while (offset < maxOffset - 10) {
       const frameId = String.fromCharCode(body[offset], body[offset + 1], body[offset + 2], body[offset + 3]);
-      if (!/^[A-Z0-9]{4}$/.test(frameId)) break; // padding / end of frames
-      const frameSize = readUInt32(body, offset + 4);
+      if (!/^[A-Z0-9]{4}$/.test(frameId)) break; // padding or non-frame
+
+      // ID3v2.4 uses synchsafe for frame sizes; ID3v2.3 uses regular UInt32
+      const frameSize = version === 4 ? readSynchsafeInt(body, offset + 4) : readUInt32(body, offset + 4);
       if (frameSize <= 0 || offset + 10 + frameSize > body.length) break;
+
       const frameData = body.slice(offset + 10, offset + 10 + frameSize);
 
       if (frameId === 'TIT2') result.title = decodeTextFrame(frameData);
@@ -152,6 +156,7 @@ export async function parseID3Tags(fileUri) {
 
       offset += 10 + frameSize;
     }
+
     return result;
   } catch (e) {
     return null;

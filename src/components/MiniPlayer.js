@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import ArtThumb from './ArtThumb';
 import { colors } from '../theme';
 
@@ -10,20 +11,20 @@ export default function MiniPlayer({ song, isPlaying, progressFrac, onOpen, onPr
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { width: `${Math.min(100, progressFrac * 100)}%` }]} />
       </View>
-      <ArtThumb song={song} size={38} radius={9} />
+      <ArtThumb song={song} size={40} radius={10} />
       <View style={styles.meta}>
         <Text numberOfLines={1} style={styles.title}>{song.title}</Text>
         <Text numberOfLines={1} style={styles.sub}>{song.artist}</Text>
       </View>
       <View style={styles.ctrls}>
-        <TouchableOpacity hitSlop={8} onPress={onPrev} style={styles.btn}>
-          <Text style={styles.icon}>⏮</Text>
+        <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} onPress={onPrev} style={styles.btn}>
+          <Ionicons name="play-skip-back" size={18} color={colors.text} />
         </TouchableOpacity>
-        <TouchableOpacity hitSlop={8} onPress={onPlayPause} style={styles.btn}>
-          <Text style={styles.icon}>{isPlaying ? '⏸' : '▶'}</Text>
+        <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} onPress={onPlayPause} style={styles.playBtn}>
+          <Ionicons name={isPlaying ? 'pause' : 'play'} size={20} color="#161213" />
         </TouchableOpacity>
-        <TouchableOpacity hitSlop={8} onPress={onNext} style={styles.btn}>
-          <Text style={styles.icon}>⏭</Text>
+        <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} onPress={onNext} style={styles.btn}>
+          <Ionicons name="play-skip-forward" size={18} color={colors.text} />
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
@@ -43,6 +44,6 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 13, fontWeight: '600' },
   sub: { color: colors.textDim, fontSize: 11 },
   ctrls: { flexDirection: 'row', alignItems: 'center' },
-  btn: { padding: 7 },
-  icon: { color: colors.text, fontSize: 16 },
+  btn: { padding: 6 },
+  playBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.text, alignItems: 'center', justifyContent: 'center', marginHorizontal: 4 },
 });

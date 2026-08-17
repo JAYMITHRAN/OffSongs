@@ -1,8 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DB_KEY = 'offsongs-data-v1';
+const LIBRARY_CACHE_KEY = 'offsongs-library-cache-v1';
 
 let DB = { stats: {}, history: [], playlists: [], settings: { repeat: 'all', smart: true } };
+let cachedSongs = null;
 let saveTimer = null;
 let listeners = [];
 
@@ -21,6 +23,37 @@ export async function loadDB() {
   }
   notify();
   return DB;
+}
+
+export async function loadLibraryCache() {
+  try {
+    const raw = await AsyncStorage.getItem(LIBRARY_CACHE_KEY);
+    if (raw) {
+      cachedSongs = JSON.parse(raw);
+      return cachedSongs;
+    }
+  } catch (e) {
+    console.warn('OffSongs: failed to load library cache', e);
+  }
+  return null;
+}
+
+export async function saveLibraryCache(songs) {
+  try {
+    cachedSongs = songs;
+    await AsyncStorage.setItem(LIBRARY_CACHE_KEY, JSON.stringify(songs));
+  } catch (e) {
+    console.warn('OffSongs: failed to save library cache', e);
+  }
+}
+
+export async function clearLibraryCache() {
+  try {
+    cachedSongs = null;
+    await AsyncStorage.removeItem(LIBRARY_CACHE_KEY);
+  } catch (e) {
+    console.warn('OffSongs: failed to clear library cache', e);
+  }
 }
 
 export function saveSoon() {
@@ -81,11 +114,32 @@ export function createPlaylist(name) {
   return pl;
 }
 
+export function renamePlaylist(playlistId, newName) {
+  const pl = DB.playlists.find((p) => p.id === playlistId);
+  if (!pl) return;
+  pl.name = newName;
+  pl.updatedAt = Date.now();
+  saveSoon();
+}
+
+export function deletePlaylist(playlistId) {
+  DB.playlists = DB.playlists.filter((p) => p.id !== playlistId);
+  saveSoon();
+}
+
 export function toggleSongInPlaylist(playlistId, songId) {
   const pl = DB.playlists.find((p) => p.id === playlistId);
   if (!pl) return;
   const idx = pl.songIds.indexOf(songId);
   if (idx === -1) pl.songIds.push(songId); else pl.songIds.splice(idx, 1);
+  pl.updatedAt = Date.now();
+  saveSoon();
+}
+
+export function removeSongFromPlaylist(playlistId, songId) {
+  const pl = DB.playlists.find((p) => p.id === playlistId);
+  if (!pl) return;
+  pl.songIds = pl.songIds.filter((id) => id !== songId);
   pl.updatedAt = Date.now();
   saveSoon();
 }

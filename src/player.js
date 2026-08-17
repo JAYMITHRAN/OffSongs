@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { AppState } from 'react-native';
 import TrackPlayer, {
   Capability, Event, State, useProgress, usePlaybackState,
   useTrackPlayerEvents,
@@ -45,6 +46,7 @@ export function usePlayer(songs) {
   const [queuePos, setQueuePos] = useState(-1);
   const [smartMode, setSmartMode] = useState(getDB().settings.smart !== false);
   const [repeatMode, setRepeatMode] = useState(getDB().settings.repeat || 'all');
+  const [appState, setAppState] = useState(AppState.currentState);
 
   const recentPlayedIds = useRef([]);
   const playStartedAt = useRef(0);
@@ -53,12 +55,21 @@ export function usePlayer(songs) {
   const queueRef = useRef([]);
   const queuePosRef = useRef(-1);
   const smartModeRef = useRef(smartMode);
+  const loadTokenRef = useRef(0);
+
   currentSongRef.current = currentSong;
   queueRef.current = queue;
   queuePosRef.current = queuePos;
   smartModeRef.current = smartMode;
 
-  const progress = useProgress(250);
+  // Battery Saver: Reduce JS bridge progress polling interval when in background
+  // allowing phone CPU to sleep while native DSP plays audio.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => setAppState(next));
+    return () => sub.remove();
+  }, []);
+
+  const progress = useProgress(appState === 'active' ? 250 : 2000);
   const playbackState = usePlaybackState();
   const isPlaying = playbackState.state === State.Playing;
 
@@ -94,23 +105,62 @@ export function usePlayer(songs) {
     }
   }, [songs]);
 
+  // Protected track loader with concurrency token and missing file fallback
   const load = useCallback(async (song, reason) => {
+    const token = ++loadTokenRef.current;
     await finalizePrevious();
-    await TrackPlayer.reset();
-    await TrackPlayer.add(toTrack(song));
-    await TrackPlayer.play();
-    setCurrentSong(song);
-    setCurrentReason(reason || null);
-    playStartedAt.current = Date.now();
-    countedThisPlay.current = false;
-    recentPlayedIds.current.push(song.id);
-    if (recentPlayedIds.current.length > 20) recentPlayedIds.current.shift();
+    if (token !== loadTokenRef.current) return;
+
+    try {
+      await TrackPlayer.reset();
+      if (token !== loadTokenRef.current) return;
+      await TrackPlayer.add(toTrack(song));
+      if (token !== loadTokenRef.current) return;
+      await TrackPlayer.play();
+
+      setCurrentSong(song);
+      setCurrentReason(reason || null);
+      playStartedAt.current = Date.now();
+      countedThisPlay.current = false;
+      recentPlayedIds.current.push(song.id);
+      if (recentPlayedIds.current.length > 20) recentPlayedIds.current.shift();
+    } catch (e) {
+      console.warn('OffSongs: playback error', e);
+    }
   }, [finalizePrevious]);
 
   const playFromLibrary = useCallback(async (song) => {
     await load(song, null);
     rebuildQueueAfter(song);
   }, [load, rebuildQueueAfter]);
+
+  const playList = useCallback(async (list, startIndex = 0) => {
+    if (!list || list.length === 0) return;
+    const startSong = list[startIndex] || list[0];
+    await load(startSong, 'Playing selection');
+    const remaining = list.slice(startIndex + 1).map((s) => ({ song: s, reason: 'Next in list' }));
+    setQueue(remaining);
+    setQueuePos(-1);
+  }, [load]);
+
+  const shuffleList = useCallback(async (list) => {
+    if (!list || list.length === 0) return;
+    const shuffled = [...list].sort(() => Math.random() - 0.5);
+    const first = shuffled[0];
+    await load(first, 'Shuffle');
+    const remaining = shuffled.slice(1).map((s) => ({ song: s, reason: 'Shuffle' }));
+    setQueue(remaining);
+    setQueuePos(-1);
+  }, [load]);
+
+  const removeFromQueue = useCallback((index) => {
+    setQueue((prev) => prev.filter((_, idx) => idx !== index));
+  }, []);
+
+  const clearQueue = useCallback(() => {
+    setQueue([]);
+    setQueuePos(-1);
+  }, []);
 
   const advance = useCallback(async (isSkip) => {
     if (isSkip && currentSongRef.current) {
@@ -218,7 +268,8 @@ export function usePlayer(songs) {
     currentSong, currentReason, queue, queuePos, isPlaying,
     position: progress.position, duration: progress.duration || (currentSong && currentSong.duration) || 0,
     smartMode, repeatMode,
-    playFromLibrary, advance, goPrev, togglePlay, toggleSmart, cycleRepeat,
+    playFromLibrary, playList, shuffleList, removeFromQueue, clearQueue,
+    advance, goPrev, togglePlay, toggleSmart, cycleRepeat,
     seekTo: (sec) => TrackPlayer.seekTo(sec),
   };
 }
