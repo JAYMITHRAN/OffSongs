@@ -5,7 +5,7 @@ import TrackPlayer, {
   useTrackPlayerEvents,
 } from 'react-native-track-player';
 import { generateQueue, sequentialQueue } from './engine';
-import { resolvePipedStreamUrl } from './onlineStream';
+import { resolveStreamUrl } from './onlineStream';
 import {
   statsFor, recordPlayStart, recordListeningEvent, recordSkip, getDB, setSetting,
 } from './store';
@@ -143,9 +143,9 @@ export function usePlayer(songs) {
     if (token !== loadTokenRef.current) return;
 
     let playableUri = song.uri || song.streamUrl;
-    if (!playableUri && song.source === 'piped' && song.videoId) {
+    if (!playableUri && song.isOnline) {
       try {
-        playableUri = await resolvePipedStreamUrl(song.videoId);
+        playableUri = await resolveStreamUrl(song);
       } catch (streamErr) {}
     }
 

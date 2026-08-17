@@ -1,6 +1,6 @@
 import * as FileSystem from 'expo-file-system';
 import { loadLibraryCache, saveLibraryCache } from './store';
-import { resolvePipedStreamUrl } from './onlineStream';
+import { resolveStreamUrl } from './onlineStream';
 
 const MUSIC_DIR = (FileSystem.documentDirectory || '') + 'music/';
 const ARTWORK_DIR = (FileSystem.documentDirectory || '') + 'artwork/';
@@ -30,8 +30,8 @@ export async function downloadSongForOffline(song, onProgress) {
   }
 
   let downloadUrl = song.downloadUrl || song.streamUrl;
-  if (!downloadUrl && song.source === 'piped' && song.videoId) {
-    downloadUrl = await resolvePipedStreamUrl(song.videoId);
+  if (!downloadUrl && song.isOnline) {
+    downloadUrl = await resolveStreamUrl(song);
   }
 
   if (!downloadUrl) {
