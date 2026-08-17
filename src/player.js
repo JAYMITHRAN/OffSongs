@@ -5,6 +5,7 @@ import TrackPlayer, {
   useTrackPlayerEvents,
 } from 'react-native-track-player';
 import { generateQueue, sequentialQueue } from './engine';
+import { resolvePipedStreamUrl } from './onlineStream';
 import {
   statsFor, recordPlayStart, recordListeningEvent, recordSkip, getDB, setSetting,
 } from './store';
@@ -30,10 +31,10 @@ export async function setupTrackPlayerOnce() {
   }
 }
 
-function toTrack(song) {
+function toTrack(song, resolvedUrl) {
   return {
     id: song.id,
-    url: song.uri,
+    url: resolvedUrl || song.uri,
     title: song.title,
     artist: song.artist,
     album: song.album,
@@ -141,9 +142,16 @@ export function usePlayer(songs) {
     await finalizePrevious();
     if (token !== loadTokenRef.current) return;
 
+    let playableUri = song.uri || song.streamUrl;
+    if (!playableUri && song.source === 'piped' && song.videoId) {
+      try {
+        playableUri = await resolvePipedStreamUrl(song.videoId);
+      } catch (streamErr) {}
+    }
+
     if (Platform.OS === 'web') {
-      setCurrentSong(song);
-      setCurrentReason(reason || null);
+      setCurrentSong({ ...song, uri: playableUri });
+      setCurrentReason(reason || (song.isOnline ? 'Online Stream' : null));
       setWebPlaying(true);
       setWebPos(0);
       playStartedAt.current = Date.now();
@@ -156,12 +164,12 @@ export function usePlayer(songs) {
     try {
       await TrackPlayer.reset();
       if (token !== loadTokenRef.current) return;
-      await TrackPlayer.add(toTrack(song));
+      await TrackPlayer.add(toTrack(song, playableUri));
       if (token !== loadTokenRef.current) return;
       await TrackPlayer.play();
 
-      setCurrentSong(song);
-      setCurrentReason(reason || null);
+      setCurrentSong({ ...song, uri: playableUri });
+      setCurrentReason(reason || (song.isOnline ? 'Online Stream' : null));
       playStartedAt.current = Date.now();
       countedThisPlay.current = false;
       recentPlayedIds.current.push(song.id);

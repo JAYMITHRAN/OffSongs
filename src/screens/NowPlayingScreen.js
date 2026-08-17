@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions, ActivityIndicator, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,7 @@ import SeekBar from '../components/SeekBar';
 import Sheet from '../components/Sheet';
 import { colors, fmtTime, gradientFor } from '../theme';
 import { statsFor, toggleFavorite as toggleFavoriteStore, getDB, createPlaylist, toggleSongInPlaylist } from '../store';
+import { downloadSongForOffline, isSongDownloaded } from '../downloader';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const ART_SIZE = Math.min(SCREEN_W * 0.74, 300);
@@ -20,7 +21,17 @@ export default function NowPlayingScreen({ player, onClose }) {
   const [queueOpen, setQueueOpen] = useState(false);
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [scrubPosition, setScrubPosition] = useState(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloaded, setIsDownloaded] = useState(false);
   const [, forceRerender] = useState(0);
+
+  useEffect(() => {
+    if (currentSong && currentSong.isOnline) {
+      isSongDownloaded(currentSong.id).then(setIsDownloaded).catch(() => {});
+    } else {
+      setIsDownloaded(false);
+    }
+  }, [currentSong]);
 
   if (!currentSong) return null;
   const st = statsFor(currentSong.id);
@@ -130,6 +141,39 @@ export default function NowPlayingScreen({ player, onClose }) {
             />
             <Text style={{ color: st.favorite ? colors.rose : colors.text, fontSize: 13, fontWeight: '600' }}>Favorite</Text>
           </TouchableOpacity>
+
+          {currentSong.isOnline && (
+            <TouchableOpacity
+              onPress={async () => {
+                if (isDownloading || isDownloaded) return;
+                setIsDownloading(true);
+                try {
+                  await downloadSongForOffline(currentSong);
+                  setIsDownloaded(true);
+                } catch (e) {
+                  Alert.alert('Download Error', 'Could not download track. Please try again.');
+                } finally {
+                  setIsDownloading(false);
+                }
+              }}
+              style={[styles.pill, isDownloaded && { borderColor: colors.teal }]}
+              disabled={isDownloading || isDownloaded}
+            >
+              {isDownloading ? (
+                <ActivityIndicator size="small" color={colors.teal} />
+              ) : (
+                <Ionicons
+                  name={isDownloaded ? 'checkmark-circle' : 'cloud-download-outline'}
+                  size={18}
+                  color={isDownloaded ? colors.teal : colors.copper}
+                />
+              )}
+              <Text style={{ color: isDownloaded ? colors.teal : colors.text, fontSize: 13, fontWeight: '600' }}>
+                {isDownloaded ? 'Saved' : isDownloading ? 'Saving…' : 'Save Offline'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity onPress={() => setPlaylistOpen(true)} style={styles.pill}>
             <Ionicons name="add-circle-outline" size={18} color={colors.text} />
             <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>Add to playlist</Text>
