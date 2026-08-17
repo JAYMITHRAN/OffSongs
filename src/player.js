@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import TrackPlayer, {
   Capability, Event, State, useProgress, usePlaybackState,
   useTrackPlayerEvents,
@@ -13,16 +13,21 @@ const TRACK_EVENTS = [Event.PlaybackActiveTrackChanged, Event.PlaybackQueueEnded
 
 let playerSetupDone = false;
 export async function setupTrackPlayerOnce() {
+  if (Platform.OS === 'web') return;
   if (playerSetupDone) return;
-  await TrackPlayer.setupPlayer({});
-  await TrackPlayer.updateOptions({
-    capabilities: [
-      Capability.Play, Capability.Pause, Capability.SkipToNext,
-      Capability.SkipToPrevious, Capability.SeekTo, Capability.Stop,
-    ],
-    compactCapabilities: [Capability.Play, Capability.Pause, Capability.SkipToNext],
-  });
-  playerSetupDone = true;
+  try {
+    await TrackPlayer.setupPlayer({});
+    await TrackPlayer.updateOptions({
+      capabilities: [
+        Capability.Play, Capability.Pause, Capability.SkipToNext,
+        Capability.SkipToPrevious, Capability.SeekTo, Capability.Stop,
+      ],
+      compactCapabilities: [Capability.Play, Capability.Pause, Capability.SkipToNext],
+    });
+    playerSetupDone = true;
+  } catch (e) {
+    console.warn('OffSongs: TrackPlayer setup failed', e);
+  }
 }
 
 function toTrack(song) {
@@ -37,16 +42,18 @@ function toTrack(song) {
   };
 }
 
-// Central playback + dynamic-queue hook, mirroring the web app's player logic
-// 1:1 but backed by the real native audio engine + OS transport controls.
 export function usePlayer(songs) {
   const [currentSong, setCurrentSong] = useState(null);
   const [currentReason, setCurrentReason] = useState(null);
-  const [queue, setQueue] = useState([]); // [{song, reason}]
+  const [queue, setQueue] = useState([]);
   const [queuePos, setQueuePos] = useState(-1);
   const [smartMode, setSmartMode] = useState(getDB().settings.smart !== false);
   const [repeatMode, setRepeatMode] = useState(getDB().settings.repeat || 'all');
   const [appState, setAppState] = useState(AppState.currentState);
+
+  // Web playback state simulation
+  const [webPlaying, setWebPlaying] = useState(false);
+  const [webPos, setWebPos] = useState(0);
 
   const recentPlayedIds = useRef([]);
   const playStartedAt = useRef(0);
@@ -62,16 +69,39 @@ export function usePlayer(songs) {
   queuePosRef.current = queuePos;
   smartModeRef.current = smartMode;
 
-  // Battery Saver: Reduce JS bridge progress polling interval when in background
-  // allowing phone CPU to sleep while native DSP plays audio.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => setAppState(next));
     return () => sub.remove();
   }, []);
 
-  const progress = useProgress(appState === 'active' ? 250 : 2000);
-  const playbackState = usePlaybackState();
-  const isPlaying = playbackState.state === State.Playing;
+  // Web progress ticker
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !webPlaying || !currentSong) return;
+    const interval = setInterval(() => {
+      setWebPos((p) => {
+        const next = p + 0.5;
+        if (currentSong.duration && next >= currentSong.duration) {
+          advance(false);
+          return 0;
+        }
+        return next;
+      });
+    }, 500);
+    return () => clearInterval(interval);
+  }, [webPlaying, currentSong]);
+
+  let nativeProgress = { position: 0, duration: 0 };
+  let nativePlaybackState = { state: State?.None };
+  if (Platform.OS !== 'web') {
+    try {
+      nativeProgress = useProgress(appState === 'active' ? 250 : 2000);
+      nativePlaybackState = usePlaybackState();
+    } catch (e) {}
+  }
+
+  const isPlaying = Platform.OS === 'web' ? webPlaying : nativePlaybackState?.state === State.Playing;
+  const currentPosition = Platform.OS === 'web' ? webPos : nativeProgress.position;
+  const currentDuration = (Platform.OS === 'web' ? (currentSong?.duration || 0) : nativeProgress.duration) || (currentSong && currentSong.duration) || 0;
 
   const finalizePrevious = useCallback(async () => {
     const prev = currentSongRef.current;
@@ -110,6 +140,18 @@ export function usePlayer(songs) {
     const token = ++loadTokenRef.current;
     await finalizePrevious();
     if (token !== loadTokenRef.current) return;
+
+    if (Platform.OS === 'web') {
+      setCurrentSong(song);
+      setCurrentReason(reason || null);
+      setWebPlaying(true);
+      setWebPos(0);
+      playStartedAt.current = Date.now();
+      countedThisPlay.current = false;
+      recentPlayedIds.current.push(song.id);
+      if (recentPlayedIds.current.length > 20) recentPlayedIds.current.shift();
+      return;
+    }
 
     try {
       await TrackPlayer.reset();
@@ -164,9 +206,11 @@ export function usePlayer(songs) {
 
   const advance = useCallback(async (isSkip) => {
     if (isSkip && currentSongRef.current) {
-      const pos = await TrackPlayer.getPosition().catch(() => 0);
-      const dur = currentSongRef.current.duration || (await TrackPlayer.getDuration().catch(() => 0));
-      if (dur && pos / dur < 0.5) recordSkip(currentSongRef.current.id);
+      if (Platform.OS !== 'web') {
+        const pos = await TrackPlayer.getPosition().catch(() => 0);
+        const dur = currentSongRef.current.duration || (await TrackPlayer.getDuration().catch(() => 0));
+        if (dur && pos / dur < 0.5) recordSkip(currentSongRef.current.id);
+      }
     }
     extendQueueIfLow();
     let q = queueRef.current;
@@ -174,8 +218,6 @@ export function usePlayer(songs) {
     if (pos >= q.length) {
       if (repeatMode === 'off') return;
       rebuildQueueAfter(q.length ? q[q.length - 1].song : currentSongRef.current);
-      // rebuildQueueAfter is async-via-state; re-read after microtask tick isn't reliable,
-      // so also compute a fresh queue synchronously for this immediate advance:
       const built = smartModeRef.current
         ? generateQueue(songs, currentSongRef.current, recentPlayedIds.current, 14)
         : sequentialQueue(songs, currentSongRef.current, 14);
@@ -189,20 +231,28 @@ export function usePlayer(songs) {
   }, [extendQueueIfLow, load, rebuildQueueAfter, repeatMode, songs]);
 
   const goPrev = useCallback(async () => {
-    const pos = await TrackPlayer.getPosition().catch(() => 0);
-    if (pos > 3) { await TrackPlayer.seekTo(0); return; }
+    if (Platform.OS === 'web') {
+      if (webPos > 3) { setWebPos(0); return; }
+    } else {
+      const pos = await TrackPlayer.getPosition().catch(() => 0);
+      if (pos > 3) { await TrackPlayer.seekTo(0); return; }
+    }
     const q = queueRef.current, qp = queuePosRef.current;
     if (qp > 0) {
       const prevItem = q[qp - 1];
       setQueuePos(qp - 1);
       await load(prevItem.song, prevItem.reason);
     } else {
-      await TrackPlayer.seekTo(0);
+      if (Platform.OS === 'web') setWebPos(0); else await TrackPlayer.seekTo(0);
     }
-  }, [load]);
+  }, [load, webPos]);
 
   const togglePlay = useCallback(async () => {
     if (!currentSongRef.current) return;
+    if (Platform.OS === 'web') {
+      setWebPlaying((p) => !p);
+      return;
+    }
     const state = await TrackPlayer.getState();
     if (state === State.Playing) await TrackPlayer.pause(); else await TrackPlayer.play();
   }, []);
@@ -237,39 +287,18 @@ export function usePlayer(songs) {
     return () => { global.offsongsOnRemoteNext = null; global.offsongsOnRemotePrev = null; };
   }, [advance, goPrev]);
 
-  useTrackPlayerEvents(TRACK_EVENTS, async (event) => {
-    if (event.type === Event.PlaybackQueueEnded) {
-      if (currentSongRef.current) {
-        recordListeningEvent({
-          songId: currentSongRef.current.id,
-          startedAt: playStartedAt.current,
-          secondsPlayed: currentSongRef.current.duration || 0,
-          durationSeconds: currentSongRef.current.duration || 0,
-        });
-      }
-      if (repeatMode === 'one') {
-        await TrackPlayer.seekTo(0);
-        await TrackPlayer.play();
-      } else {
-        advance(false);
-      }
-    }
-  });
-
-  // Count a "play" after 3s of real listening (matches web app's threshold).
-  useEffect(() => {
-    if (!countedThisPlay.current && progress.position > 3 && currentSong) {
-      countedThisPlay.current = true;
-      recordPlayStart(currentSong.id);
-    }
-  }, [progress.position, currentSong]);
-
   return {
     currentSong, currentReason, queue, queuePos, isPlaying,
-    position: progress.position, duration: progress.duration || (currentSong && currentSong.duration) || 0,
+    position: currentPosition, duration: currentDuration,
     smartMode, repeatMode,
     playFromLibrary, playList, shuffleList, removeFromQueue, clearQueue,
     advance, goPrev, togglePlay, toggleSmart, cycleRepeat,
-    seekTo: (sec) => TrackPlayer.seekTo(sec),
+    seekTo: (sec) => {
+      if (Platform.OS === 'web') {
+        setWebPos(sec);
+      } else {
+        TrackPlayer.seekTo(sec);
+      }
+    },
   };
 }

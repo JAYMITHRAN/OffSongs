@@ -373,6 +373,7 @@ function SongList({
       keyExtractor={(s) => s.id}
       contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 130 }}
       ListHeaderComponent={<Text style={styles.sectionLabel}>{label} · {songs.length}</Text>}
+      getItemLayout={(data, index) => ({ length: 62, offset: 62 * index, index })}
       renderItem={({ item }) => (
         <SongRow
           song={item}
@@ -385,9 +386,10 @@ function SongList({
           onToggleFavorite={() => onToggleFav(item.id)}
         />
       )}
-      initialNumToRender={20}
-      maxToRenderPerBatch={30}
+      initialNumToRender={15}
+      maxToRenderPerBatch={15}
       windowSize={7}
+      updateCellsBatchingPeriod={50}
       removeClippedSubviews
     />
   );
