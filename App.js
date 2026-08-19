@@ -1,12 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet, StatusBar, SafeAreaView, TouchableOpacity, Text, BackHandler } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, StyleSheet, StatusBar, SafeAreaView, TouchableOpacity, Text, BackHandler, ToastAndroid, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import LibraryScreen from './src/screens/LibraryScreen';
 import NowPlayingScreen from './src/screens/NowPlayingScreen';
 import MiniPlayer from './src/components/MiniPlayer';
 import { colors } from './src/theme';
-import { loadDB, loadLibraryCache, saveLibraryCache } from './src/store';
+import { loadDB, loadLibraryCache, saveLibraryCache, subscribe } from './src/store';
 import { setupTrackPlayerOnce, usePlayer } from './src/player';
 import { requestPermissionAndScan, enrichSongWithTags } from './src/library';
 
@@ -24,24 +24,66 @@ export default function App() {
       const cached = await loadLibraryCache();
       if (cached && cached.length > 0) {
         setSongs(cached);
+        // Enrich any songs that haven't had HD art or metadata resolved
+        const needsEnrich = cached.some((s) => !s._tagsLoaded || !s.artworkUrl || s.artist === 'Unknown Artist');
+        if (needsEnrich) {
+          enrichInBackground(cached, setSongs);
+        }
+      } else {
+        // First run / no cache: auto-scan music library seamlessly
+        try {
+          const found = await requestPermissionAndScan((count) => setScanProgress(count));
+          if (found && found.length > 0) {
+            setSongs(found);
+            await saveLibraryCache(found);
+            enrichInBackground(found, setSongs);
+          }
+        } catch (e) {
+          // If permissions not granted yet, user can click "Connect music library"
+        }
       }
       await setupTrackPlayerOnce();
       setDbReady(true);
     })();
+
+    const unsub = subscribe(async () => {
+      const cached = await loadLibraryCache();
+      if (cached && cached.length > 0) {
+        setSongs((prev) => {
+          if (prev.length !== cached.length) return cached;
+          return prev;
+        });
+      }
+    });
+    return () => unsub();
   }, []);
 
-  // Android Hardware Back Button: smoothly collapses NowPlaying modal before exiting
+  // Android Hardware Back Button: smoothly collapses NowPlaying, navigates to Songs tab, or double-press to exit
+  const lastBackRef = useRef(0);
   useEffect(() => {
     const onBackPress = () => {
       if (nowPlayingOpen) {
         setNowPlayingOpen(false);
         return true;
       }
-      return false;
+      if (activeTab !== 'songs') {
+        setActiveTab('songs');
+        return true;
+      }
+      const now = Date.now();
+      if (now - lastBackRef.current < 2000) {
+        BackHandler.exitApp();
+        return true;
+      }
+      lastBackRef.current = now;
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Press back again to exit OffSongs', ToastAndroid.SHORT);
+      }
+      return true;
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => sub.remove();
-  }, [nowPlayingOpen]);
+  }, [nowPlayingOpen, activeTab]);
 
   const player = usePlayer(songs);
 
@@ -60,10 +102,9 @@ export default function App() {
     }
   }, []);
 
-  function handlePlaySong(song) {
+  const handlePlaySong = useCallback((song) => {
     player.playFromLibrary(song);
-    setNowPlayingOpen(true);
-  }
+  }, [player]);
 
   if (!dbReady) return <View style={styles.fill} />;
 
@@ -146,8 +187,8 @@ async function enrichInBackground(initialSongs, setSongs) {
     const batch = songs.slice(i, i + BATCH);
     await Promise.all(batch.map((s) => enrichSongWithTags(s)));
 
-    // Update state & disk cache every 12 songs or on last batch
-    if (i + BATCH >= songs.length || (i > 0 && i % 12 === 0)) {
+    // Update state & disk cache every 9 songs or on last batch
+    if (i + BATCH >= songs.length || (i > 0 && i % 9 === 0)) {
       setSongs((prev) => {
         const updated = prev.map((s) => {
           const match = songs.find((b) => b.id === s.id && b._tagsLoaded);

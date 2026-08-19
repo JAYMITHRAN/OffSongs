@@ -14,10 +14,17 @@ export default function SeekBar({
   const [isDragging, setIsDragging] = useState(false);
   const [dragFrac, setDragFrac] = useState(null);
 
-  const calculateFrac = (pageX) => {
-    if (layoutRef.current.width <= 0) return 0;
-    const relativeX = pageX - layoutRef.current.pageX;
-    return Math.max(0, Math.min(1, relativeX / layoutRef.current.width));
+  const calculateFrac = (pageX, locationX) => {
+    const width = layoutRef.current.width;
+    if (width <= 0) return 0;
+    if (pageX !== undefined && layoutRef.current.pageX > 0) {
+      const relativeX = pageX - layoutRef.current.pageX;
+      return Math.max(0, Math.min(1, relativeX / width));
+    }
+    if (locationX !== undefined && locationX >= 0) {
+      return Math.max(0, Math.min(1, locationX / width));
+    }
+    return 0;
   };
 
   const panResponder = useMemo(() => PanResponder.create({
@@ -25,17 +32,23 @@ export default function SeekBar({
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
       setIsDragging(true);
-      const frac = calculateFrac(e.nativeEvent.pageX);
+      if (containerRef.current) {
+        containerRef.current.measure((x, y, w, h, pageX) => {
+          if (w > 0) layoutRef.current.width = w;
+          if (pageX !== undefined) layoutRef.current.pageX = pageX;
+        });
+      }
+      const frac = calculateFrac(e.nativeEvent.pageX, e.nativeEvent.locationX);
       setDragFrac(frac);
       if (onScrubbing) onScrubbing(frac);
     },
     onPanResponderMove: (e) => {
-      const frac = calculateFrac(e.nativeEvent.pageX);
+      const frac = calculateFrac(e.nativeEvent.pageX, e.nativeEvent.locationX);
       setDragFrac(frac);
       if (onScrubbing) onScrubbing(frac);
     },
     onPanResponderRelease: (e) => {
-      const frac = calculateFrac(e.nativeEvent.pageX);
+      const frac = calculateFrac(e.nativeEvent.pageX, e.nativeEvent.locationX);
       setIsDragging(false);
       setDragFrac(null);
       if (onSeek) onSeek(frac);
@@ -46,10 +59,13 @@ export default function SeekBar({
     },
   }), [onSeek, onScrubbing]);
 
-  const onLayout = () => {
+  const onLayout = (e) => {
+    const { width } = e.nativeEvent.layout;
+    if (width > 0) layoutRef.current.width = width;
     if (containerRef.current) {
-      containerRef.current.measure((x, y, width, height, pageX, pageY) => {
-        layoutRef.current = { width, pageX };
+      containerRef.current.measure((x, y, w, h, pageX) => {
+        if (w > 0) layoutRef.current.width = w;
+        if (pageX !== undefined) layoutRef.current.pageX = pageX;
       });
     }
   };

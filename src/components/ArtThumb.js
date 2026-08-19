@@ -1,22 +1,45 @@
-import React, { useState, useEffect } from 'react';
-import { View, Image, Text, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Image, Text, StyleSheet, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { gradientFor } from '../theme';
 
 export default function ArtThumb({ song, size = 46, radius = 10, fontSize }) {
-  const [hasError, setHasError] = useState(false);
+  const [candidateIndex, setCandidateIndex] = useState(0);
   const style = { width: size, height: size, borderRadius: radius, overflow: 'hidden' };
 
-  useEffect(() => {
-    setHasError(false);
-  }, [song?.artworkUrl, song?.id]);
+  // Candidates ordered from highest-fidelity to native system fallback
+  const candidates = useMemo(() => {
+    if (!song) return [];
+    const list = [];
+    if (song.artworkUrl) list.push(song.artworkUrl);
+    if (song.mediaStoreArtUri && !list.includes(song.mediaStoreArtUri)) {
+      list.push(song.mediaStoreArtUri);
+    }
+    if (Platform.OS === 'android') {
+      if (song.albumId) {
+        const albumArt = `content://media/external/audio/albumart/${song.albumId}`;
+        if (!list.includes(albumArt)) list.push(albumArt);
+      }
+      if (song.assetId) {
+        const mediaArt = `content://media/external/audio/media/${song.assetId}/albumart`;
+        if (!list.includes(mediaArt)) list.push(mediaArt);
+      }
+    }
+    return list;
+  }, [song?.artworkUrl, song?.mediaStoreArtUri, song?.albumId, song?.assetId]);
 
-  if (song && song.artworkUrl && !hasError) {
+  useEffect(() => {
+    setCandidateIndex(0);
+  }, [song?.artworkUrl, song?.mediaStoreArtUri, song?.id]);
+
+  const currentUri = candidates[candidateIndex];
+
+  if (currentUri) {
     return (
       <Image
-        source={{ uri: song.artworkUrl }}
+        source={{ uri: currentUri }}
         style={style}
-        onError={() => setHasError(true)}
+        onError={() => setCandidateIndex((prev) => prev + 1)}
       />
     );
   }

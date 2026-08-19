@@ -6,8 +6,10 @@ import { colors, fmtTime } from '../theme';
 
 function SongRow({
   song, isCurrent, isPlaying, isFavorite, isDownloading, isDownloaded,
-  onPress, onLongPress, onToggleFavorite, onMenuPress, onDownload,
+  onPress, onLongPress, onToggleFavorite, onMenuPress, onDownload, showSearchBadges,
 }) {
+  const isLocalOrDownloaded = !song.isOnline || isDownloaded;
+
   return (
     <TouchableOpacity
       style={styles.row}
@@ -22,7 +24,12 @@ function SongRow({
           <Text numberOfLines={1} style={[styles.title, isCurrent && { color: colors.copper }, { flexShrink: 1 }]}>
             {song.title}
           </Text>
-          {song.isOnline && (
+          {showSearchBadges && isLocalOrDownloaded && (
+            <View style={styles.offlineBadge}>
+              <Text style={styles.offlineBadgeTxt}>OFFLINE</Text>
+            </View>
+          )}
+          {showSearchBadges && song.isOnline && !isDownloaded && (
             <View style={styles.onlineBadge}>
               <Text style={styles.onlineBadgeTxt}>
                 {song.source === 'saavn' ? '320K' : 'WEB'}
@@ -41,34 +48,43 @@ function SongRow({
         <Text style={styles.dur}>{song.duration ? fmtTime(song.duration) : ''}</Text>
       )}
 
-      {/* Online 1-Tap Download Button */}
-      {song.isOnline && onDownload && (
+      {/* Online Download Button (only shown for online songs that are not yet downloaded) */}
+      {song.isOnline && !isDownloaded && onDownload && (
         <TouchableOpacity
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           onPress={onDownload}
           style={styles.actionBtn}
-          disabled={isDownloading || isDownloaded}
+          disabled={isDownloading}
         >
           {isDownloading ? (
             <ActivityIndicator size="small" color={colors.teal} />
           ) : (
             <Ionicons
-              name={isDownloaded ? 'checkmark-circle' : 'cloud-download-outline'}
+              name="cloud-download-outline"
               size={19}
-              color={isDownloaded ? colors.teal : colors.copper}
+              color={colors.copper}
             />
           )}
         </TouchableOpacity>
       )}
 
+      {/* Downloaded checkmark badge if searching */}
+      {showSearchBadges && song.isOnline && isDownloaded && (
+        <View style={styles.actionBtn}>
+          <Ionicons name="checkmark-circle" size={18} color={colors.teal} />
+        </View>
+      )}
+
       {/* Favorite Button */}
-      <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={onToggleFavorite} style={styles.actionBtn}>
-        <Ionicons
-          name={isFavorite ? 'heart' : 'heart-outline'}
-          size={18}
-          color={isFavorite ? colors.rose : colors.textFaint}
-        />
-      </TouchableOpacity>
+      {onToggleFavorite && (
+        <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={onToggleFavorite} style={styles.actionBtn}>
+          <Ionicons
+            name={isFavorite ? 'heart' : 'heart-outline'}
+            size={18}
+            color={isFavorite ? colors.rose : colors.textFaint}
+          />
+        </TouchableOpacity>
+      )}
 
       {/* 3-Dots Options Menu */}
       {onMenuPress && (
@@ -80,17 +96,7 @@ function SongRow({
   );
 }
 
-export default React.memo(SongRow, (prev, next) =>
-  prev.song.id === next.song.id &&
-  prev.song.title === next.song.title &&
-  prev.song.artist === next.song.artist &&
-  prev.song.artworkUrl === next.song.artworkUrl &&
-  prev.isCurrent === next.isCurrent &&
-  prev.isPlaying === next.isPlaying &&
-  prev.isFavorite === next.isFavorite &&
-  prev.isDownloading === next.isDownloading &&
-  prev.isDownloaded === next.isDownloaded
-);
+export default React.memo(SongRow);
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 8, paddingHorizontal: 4, height: 62 },
@@ -98,7 +104,9 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 14, fontWeight: '600' },
   sub: { color: colors.textDim, fontSize: 12, marginTop: 1 },
   dur: { color: colors.textFaint, fontSize: 11, fontVariant: ['tabular-nums'], marginRight: 2 },
-  onlineBadge: { backgroundColor: 'rgba(79,200,184,0.15)', paddingVertical: 1, paddingHorizontal: 5, borderRadius: 4 },
-  onlineBadgeTxt: { color: colors.teal, fontSize: 9, fontWeight: '700' },
+  offlineBadge: { backgroundColor: 'rgba(79,200,184,0.18)', borderWidth: 1, borderColor: colors.teal, paddingVertical: 1, paddingHorizontal: 5, borderRadius: 4 },
+  offlineBadgeTxt: { color: colors.teal, fontSize: 8.5, fontWeight: '800', letterSpacing: 0.5 },
+  onlineBadge: { backgroundColor: 'rgba(232,147,92,0.18)', borderWidth: 1, borderColor: colors.copper, paddingVertical: 1, paddingHorizontal: 5, borderRadius: 4 },
+  onlineBadgeTxt: { color: colors.copper, fontSize: 8.5, fontWeight: '800', letterSpacing: 0.5 },
   actionBtn: { padding: 4 },
 });

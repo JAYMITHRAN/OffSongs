@@ -1,35 +1,50 @@
 import * as FileSystem from 'expo-file-system';
-import { loadLibraryCache, saveLibraryCache } from './store';
+import * as MediaLibrary from 'expo-media-library';
+import { Platform } from 'react-native';
+import { loadLibraryCache, saveLibraryCache, registerTrack } from './store';
 import { resolveStreamUrl } from './onlineStream';
 
-const MUSIC_DIR = (FileSystem.documentDirectory || '') + 'music/';
-const ARTWORK_DIR = (FileSystem.documentDirectory || '') + 'artwork/';
+function getMusicDir() {
+  const doc = FileSystem.documentDirectory || '';
+  return doc.endsWith('/') ? `${doc}music/` : `${doc}/music/`;
+}
+
+function getArtworkDir() {
+  const doc = FileSystem.documentDirectory || '';
+  return doc.endsWith('/') ? `${doc}artwork/` : `${doc}/artwork/`;
+}
 
 async function ensureDirs() {
   try {
-    const mInfo = await FileSystem.getInfoAsync(MUSIC_DIR);
-    if (!mInfo.exists) await FileSystem.makeDirectoryAsync(MUSIC_DIR, { intermediates: true });
+    const musicDir = getMusicDir();
+    const artDir = getArtworkDir();
 
-    const aInfo = await FileSystem.getInfoAsync(ARTWORK_DIR);
-    if (!aInfo.exists) await FileSystem.makeDirectoryAsync(ARTWORK_DIR, { intermediates: true });
+    const mInfo = await FileSystem.getInfoAsync(musicDir);
+    if (!mInfo.exists) await FileSystem.makeDirectoryAsync(musicDir, { intermediates: true });
 
-    // .nomedia prevents phone photo gallery and media scanner from polluting
-    const nomedia = await FileSystem.getInfoAsync(ARTWORK_DIR + '.nomedia');
-    if (!nomedia.exists) await FileSystem.writeAsStringAsync(ARTWORK_DIR + '.nomedia', '');
-  } catch (e) {}
+    const aInfo = await FileSystem.getInfoAsync(artDir);
+    if (!aInfo.exists) await FileSystem.makeDirectoryAsync(artDir, { intermediates: true });
+
+    // .nomedia prevents external photo galleries and scanners from polluting artwork
+    const nomedia = await FileSystem.getInfoAsync(artDir + '.nomedia');
+    if (!nomedia.exists) await FileSystem.writeAsStringAsync(artDir + '.nomedia', '');
+  } catch (e) {
+    console.warn('OffSongs: ensureDirs warning', e);
+  }
 }
 
-const activeDownloads = new Map(); // id -> DownloadResumable
+const activeDownloads = new Set(); // set of song ids
 
-// Downloads an online song with 1 tap, saves audio + HD art, and adds to local library
-export async function downloadSongForOffline(song, onProgress) {
+// Downloads an online song, saves audio (m4a/mp3) + HD artwork, and indexes to local library
+export async function downloadSongForOffline(song) {
+  if (!song) throw new Error('Invalid song object for download');
   await ensureDirs();
 
   if (activeDownloads.has(song.id)) {
     return { success: false, message: 'Download already in progress' };
   }
 
-  let downloadUrl = song.downloadUrl || song.streamUrl;
+  let downloadUrl = song.streamUrl || song.downloadUrl || song.uri;
   if (!downloadUrl && song.isOnline) {
     downloadUrl = await resolveStreamUrl(song);
   }
@@ -38,80 +53,129 @@ export async function downloadSongForOffline(song, onProgress) {
     throw new Error('Unable to resolve audio stream for download');
   }
 
-  const localAudioPath = `${MUSIC_DIR}${song.id}.mp3`;
-  const localArtPath = `${ARTWORK_DIR}art_${song.id}.jpg`;
+  // Determine correct audio container extension for Android 13/14 MediaStore compatibility
+  let ext = 'm4a';
+  if (downloadUrl.includes('.mp3')) ext = 'mp3';
+  else if (downloadUrl.includes('.aac')) ext = 'aac';
+  else if (downloadUrl.includes('.flac')) ext = 'flac';
+
+  const safeId = (song.id || 'track_' + Date.now()).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const localAudioPath = `${getMusicDir()}${safeId}.${ext}`;
+  const localArtPath = `${getArtworkDir()}art_${safeId}.jpg`;
+
+  activeDownloads.add(song.id);
 
   try {
-    // 1. Download audio file
-    const downloadResumable = FileSystem.createDownloadResumable(
-      downloadUrl,
-      localAudioPath,
-      {},
-      (downloadProgress) => {
-        const total = downloadProgress.totalBytesExpectedToWrite;
-        const current = downloadProgress.totalBytesWritten;
-        const frac = total > 0 ? current / total : 0;
-        if (onProgress) onProgress(frac);
+    // 0. Clean any existing partial download file to prevent EEXIST locks
+    try {
+      const existing = await FileSystem.getInfoAsync(localAudioPath);
+      if (existing.exists) {
+        await FileSystem.deleteAsync(localAudioPath, { idempotent: true });
       }
-    );
+    } catch (delErr) {}
 
-    activeDownloads.set(song.id, downloadResumable);
-    const result = await downloadResumable.downloadAsync();
-    activeDownloads.delete(song.id);
+    // 1. Prepare candidates (320k, 160k, original)
+    const urlsToTry = [];
+    if (downloadUrl.includes('_96.mp4') || downloadUrl.includes('_160.mp4') || downloadUrl.includes('_320.mp4')) {
+      urlsToTry.push(downloadUrl.replace(/_96\.mp4|_160\.mp4/, '_320.mp4'));
+      urlsToTry.push(downloadUrl.replace(/_96\.mp4|_320\.mp4/, '_160.mp4'));
+      urlsToTry.push(downloadUrl);
+    } else {
+      urlsToTry.push(downloadUrl);
+    }
 
-    if (!result || !result.uri) {
-      throw new Error('Audio download failed');
+    let dlResult = null;
+    let lastError = null;
+
+    for (const url of urlsToTry) {
+      try {
+        // Clean before attempt
+        const check = await FileSystem.getInfoAsync(localAudioPath);
+        if (check.exists) await FileSystem.deleteAsync(localAudioPath, { idempotent: true });
+
+        dlResult = await FileSystem.downloadAsync(url, localAudioPath, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Mobile)' },
+        });
+        if (dlResult && dlResult.uri && (!dlResult.status || dlResult.status < 400)) {
+          break;
+        }
+      } catch (tryErr) {
+        lastError = tryErr;
+      }
+    }
+
+    if (!dlResult || !dlResult.uri || (dlResult.status && dlResult.status >= 400)) {
+      throw new Error(`Download failed: ${lastError?.message || 'Server returned status ' + dlResult?.status}`);
     }
 
     // 2. Download HD Artwork
     let savedArtUrl = null;
     if (song.artworkUrl && song.artworkUrl.startsWith('http')) {
       try {
-        const artResult = await FileSystem.downloadAsync(song.artworkUrl, localArtPath);
+        const artResult = await FileSystem.downloadAsync(song.artworkUrl, localArtPath, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Mobile)' },
+        });
         if (artResult && artResult.uri) savedArtUrl = artResult.uri;
       } catch (artErr) {
-        // use fallback gradient
+        // Fallback to online/dynamic gradient thumbnail
       }
     }
 
-    // 3. Create permanent local song record
+    // 3. Register with Android Media Library if permitted (safe, non-blocking)
+    let assetId = null;
+    try {
+      if (Platform.OS === 'android') {
+        const asset = await MediaLibrary.createAssetAsync(dlResult.uri);
+        if (asset && asset.id) {
+          assetId = asset.id;
+        }
+      }
+    } catch (mlErr) {
+      // Non-blocking fallback
+    }
+
+    // 4. Create permanent local song record using reliable file:// URI
     const localSong = {
       id: song.id,
-      title: song.title,
-      artist: song.artist,
+      assetId,
+      title: song.title || 'Downloaded Track',
+      artist: song.artist || 'Unknown Artist',
       album: song.album || 'Downloaded',
       folder: 'Downloads',
       genre: song.genre || '',
       duration: song.duration || 0,
-      uri: result.uri,
-      artworkUrl: savedArtUrl,
+      uri: dlResult.uri,
+      artworkUrl: savedArtUrl || song.artworkUrl,
       addedAt: Date.now(),
       isOnline: false,
       isDownloaded: true,
       _tagsLoaded: true,
     };
 
-    // 4. Save directly into AsyncStorage library cache
+    // 5. Save into library cache and register in persistent track map
     const currentLibrary = (await loadLibraryCache()) || [];
-    const exists = currentLibrary.some((s) => s.id === localSong.id);
-    if (!exists) {
-      const updated = [localSong, ...currentLibrary];
-      await saveLibraryCache(updated);
-    }
+    const filtered = currentLibrary.filter((s) => s.id !== localSong.id);
+    const updated = [localSong, ...filtered];
+    await saveLibraryCache(updated);
+    registerTrack(localSong);
 
     return { success: true, song: localSong };
-  } catch (err) {
+  } finally {
     activeDownloads.delete(song.id);
-    throw err;
   }
 }
 
 // Checks if a song has already been downloaded locally
 export async function isSongDownloaded(songId) {
   try {
-    const path = `${MUSIC_DIR}${songId}.mp3`;
-    const info = await FileSystem.getInfoAsync(path);
-    return info.exists;
+    const safeId = (songId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const pathM4a = `${getMusicDir()}${safeId}.m4a`;
+    const pathMp3 = `${getMusicDir()}${safeId}.mp3`;
+    const [infoM4a, infoMp3] = await Promise.all([
+      FileSystem.getInfoAsync(pathM4a),
+      FileSystem.getInfoAsync(pathMp3),
+    ]);
+    return infoM4a.exists || infoMp3.exists;
   } catch (e) {
     return false;
   }

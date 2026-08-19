@@ -1,5 +1,8 @@
 // Global Ad-Free Online Music Streaming Engine
-// Uses direct official JioSaavn API and iTunes Public API for 100% reliability and 320kbps audio.
+// Uses direct official JioSaavn API with instant local DES decryption and iTunes Public API for 100% reliability and 320kbps audio.
+import CryptoJS from 'crypto-js';
+
+const SAAVN_DES_KEY = '38346591';
 
 // Helper to fetch with timeout
 async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -22,10 +25,31 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   }
 }
 
+// Instant 0ms offline DES-ECB decryption of Saavn encrypted media URLs
+export function decryptSaavnUrl(encUrl) {
+  if (!encUrl) return null;
+  try {
+    const key = CryptoJS.enc.Utf8.parse(SAAVN_DES_KEY);
+    const decrypted = CryptoJS.DES.decrypt(
+      { ciphertext: CryptoJS.enc.Base64.parse(encUrl) },
+      key,
+      { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 }
+    );
+    let url = decrypted.toString(CryptoJS.enc.Utf8);
+    if (!url || !url.startsWith('http')) return null;
+
+    // Direct 320kbps AAC / MP4 CDN audio stream
+    url = url.replace(/_96\.mp4|_160\.mp4/, '_320.mp4');
+    return url;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Searches JioSaavn directly for all Indian and international songs
 async function searchSaavn(query) {
   try {
-    const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&n=20&p=1&q=${encodeURIComponent(query)}`;
+    const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&n=25&p=1&q=${encodeURIComponent(query)}`;
     const res = await fetchWithTimeout(url);
     if (!res.ok) return [];
     const data = await res.json();
@@ -42,6 +66,9 @@ async function searchSaavn(query) {
       let album = item.album || (item.more_info && item.more_info.album) || 'Single';
       let duration = parseInt(item.duration || (item.more_info && item.more_info.duration), 10) || 0;
 
+      // Instant local DES decryption for instant 1-click playback
+      const directUrl = encUrl ? decryptSaavnUrl(encUrl) : null;
+
       return {
         id: 'saavn_' + item.id,
         source: 'saavn',
@@ -50,8 +77,8 @@ async function searchSaavn(query) {
         album: decodeHtmlEntities(album),
         duration,
         encryptedMediaUrl: encUrl,
-        streamUrl: null, // resolved on-demand via generateAuthToken
-        uri: null,
+        streamUrl: directUrl,
+        uri: directUrl,
         artworkUrl: hdArtwork,
         isOnline: true,
       };
@@ -61,28 +88,32 @@ async function searchSaavn(query) {
   }
 }
 
-// Resolves on-demand direct 320kbps streaming & download URL from JioSaavn CDN
+// Resolves on-demand direct 320kbps streaming & download URL
 export async function resolveStreamUrl(song) {
   if (song.streamUrl) return song.streamUrl;
-  if (!song.encryptedMediaUrl) return null;
+  if (song.encryptedMediaUrl) {
+    const decrypted = decryptSaavnUrl(song.encryptedMediaUrl);
+    if (decrypted) {
+      song.streamUrl = decrypted;
+      song.uri = decrypted;
+      return decrypted;
+    }
+  }
 
   try {
     const tokenUrl = `https://www.jiosaavn.com/api.php?__call=song.generateAuthToken&url=${encodeURIComponent(song.encryptedMediaUrl)}&bitrate=320&_format=json`;
     const res = await fetchWithTimeout(tokenUrl);
     if (!res.ok) return null;
     const data = await res.json();
-    const authUrl = data.auth_url;
-    if (!authUrl) return null;
+    const authUrl = data.auth_url || data.media_url;
+    if (authUrl) {
+      song.streamUrl = authUrl;
+      song.uri = authUrl;
+      return authUrl;
+    }
+  } catch (e) {}
 
-    // Follow CDN redirect directly to aac.saavncdn.com
-    const cdnRes = await fetch(authUrl, { method: 'HEAD', redirect: 'follow' });
-    const finalUrl = cdnRes.url || authUrl;
-    song.streamUrl = finalUrl;
-    song.uri = finalUrl;
-    return finalUrl;
-  } catch (e) {
-    return null;
-  }
+  return song.uri || song.streamUrl || null;
 }
 
 // Global iTunes search fallback for international catalog

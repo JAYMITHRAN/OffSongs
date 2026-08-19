@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import ArtThumb from '../components/ArtThumb';
 import SeekBar from '../components/SeekBar';
+import RotaryVolumeDial from '../components/RotaryVolumeDial';
 import Sheet from '../components/Sheet';
 import { colors, fmtTime, gradientFor } from '../theme';
 import { statsFor, toggleFavorite as toggleFavoriteStore, getDB, createPlaylist, toggleSongInPlaylist } from '../store';
@@ -16,7 +17,7 @@ const ART_SIZE = Math.min(SCREEN_W * 0.74, 300);
 export default function NowPlayingScreen({ player, onClose }) {
   const {
     currentSong, currentReason, queue, queuePos, isPlaying, position, duration,
-    smartMode, repeatMode, advance, goPrev, togglePlay, toggleSmart, cycleRepeat, seekTo,
+    smartMode, repeatMode, volume = 1.0, setVolume, advance, goPrev, togglePlay, toggleSmart, cycleRepeat, seekTo,
   } = player;
   const [queueOpen, setQueueOpen] = useState(false);
   const [playlistOpen, setPlaylistOpen] = useState(false);
@@ -50,8 +51,12 @@ export default function NowPlayingScreen({ player, onClose }) {
     <View style={styles.fill}>
       {/* Blurred artwork background */}
       <View style={StyleSheet.absoluteFill}>
-        {currentSong.artworkUrl ? (
-          <Image source={{ uri: currentSong.artworkUrl }} style={StyleSheet.absoluteFill} blurRadius={40} />
+        {currentSong.artworkUrl || currentSong.mediaStoreArtUri ? (
+          <Image
+            source={{ uri: currentSong.artworkUrl || currentSong.mediaStoreArtUri }}
+            style={StyleSheet.absoluteFill}
+            blurRadius={40}
+          />
         ) : (
           <LinearGradient colors={[c1, c2]} style={StyleSheet.absoluteFill} />
         )}
@@ -74,111 +79,125 @@ export default function NowPlayingScreen({ player, onClose }) {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.artWrap}>
-          <View style={styles.artShadow}>
-            <ArtThumb song={currentSong} size={ART_SIZE} radius={26} fontSize={64} />
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+          <View style={styles.artWrap}>
+            <View style={styles.artShadow}>
+              <ArtThumb song={currentSong} size={ART_SIZE} radius={26} fontSize={64} />
+            </View>
           </View>
-        </View>
 
-        <View style={styles.meta}>
-          <Text numberOfLines={1} style={styles.title}>{currentSong.title}</Text>
-          <Text numberOfLines={1} style={styles.artist}>{currentSong.artist}</Text>
-          {currentReason ? (
-            <View style={styles.reasonPill}><Text style={styles.reasonTxt}>✦ {currentReason}</Text></View>
-          ) : null}
-        </View>
+          <View style={styles.meta}>
+            <Text numberOfLines={1} style={styles.title}>{currentSong.title}</Text>
+            <Text numberOfLines={1} style={styles.artist}>{currentSong.artist}</Text>
+            {currentReason ? (
+              <View style={styles.reasonPill}><Text style={styles.reasonTxt}>✦ {currentReason}</Text></View>
+            ) : null}
+          </View>
 
-        {/* Smooth Line & Dot Seek Scrubber */}
-        <SeekBar
-          progressFrac={progressFrac}
-          accentColor={colors.copper}
-          onScrubbing={(frac) => setScrubPosition(frac * (duration || 0))}
-          onSeek={(frac) => {
-            seekTo(frac * (duration || 0));
-            setScrubPosition(null);
-          }}
-        />
+          {/* Smooth Line & Dot Seek Scrubber */}
+          <SeekBar
+            progressFrac={progressFrac}
+            accentColor={colors.copper}
+            onScrubbing={(frac) => setScrubPosition(frac * (duration || 0))}
+            onSeek={(frac) => {
+              seekTo(frac * (duration || 0));
+              setScrubPosition(null);
+            }}
+          />
 
-        <View style={styles.timesRow}>
-          <Text style={styles.timeTxt}>{fmtTime(currentDisplayTime)}</Text>
-          <Text style={styles.timeTxt}>{fmtTime(duration)}</Text>
-        </View>
+          <View style={styles.timesRow}>
+            <Text style={styles.timeTxt}>{fmtTime(currentDisplayTime)}</Text>
+            <Text style={styles.timeTxt}>{fmtTime(duration)}</Text>
+          </View>
 
-        <View style={styles.controlsRow}>
-          <TouchableOpacity onPress={toggleSmart} style={styles.sideBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons
-              name="shuffle"
-              size={22}
-              color={smartMode ? colors.copper : colors.textDim}
-            />
-          </TouchableOpacity>
-          <View style={styles.mainCtrls}>
-            <TouchableOpacity onPress={goPrev} style={styles.mainBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="play-skip-back" size={26} color={colors.text} />
+          <View style={styles.controlsRow}>
+            <TouchableOpacity onPress={toggleSmart} style={styles.sideBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons
+                name="shuffle"
+                size={22}
+                color={smartMode ? colors.copper : colors.textDim}
+              />
             </TouchableOpacity>
-            <TouchableOpacity onPress={togglePlay} style={styles.playBtn} activeOpacity={0.85}>
-              <Ionicons name={isPlaying ? 'pause' : 'play'} size={32} color="#161213" />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => advance(true)} style={styles.mainBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="play-skip-forward" size={26} color={colors.text} />
+            <View style={styles.mainCtrls}>
+              <TouchableOpacity onPress={goPrev} style={styles.mainBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="play-skip-back" size={26} color={colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={togglePlay} style={styles.playBtn} activeOpacity={0.85}>
+                <Ionicons name={isPlaying ? 'pause' : 'play'} size={32} color="#161213" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => advance(true)} style={styles.mainBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="play-skip-forward" size={26} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity onPress={cycleRepeat} style={styles.sideBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons
+                name={repeatMode === 'one' ? 'repeat-outline' : 'repeat'}
+                size={22}
+                color={repeatMode !== 'off' ? colors.copper : colors.textDim}
+              />
             </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={cycleRepeat} style={styles.sideBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons
-              name={repeatMode === 'one' ? 'repeat-outline' : 'repeat'}
-              size={22}
-              color={repeatMode !== 'off' ? colors.copper : colors.textDim}
-            />
-          </TouchableOpacity>
-        </View>
 
-        <View style={styles.bottomRow}>
-          <TouchableOpacity onPress={onFavorite} style={[styles.pill, st.favorite && { borderColor: colors.rose }]}>
-            <Ionicons
-              name={st.favorite ? 'heart' : 'heart-outline'}
-              size={18}
-              color={st.favorite ? colors.rose : colors.text}
-            />
-            <Text style={{ color: st.favorite ? colors.rose : colors.text, fontSize: 13, fontWeight: '600' }}>Favorite</Text>
-          </TouchableOpacity>
+          {/* Circular Rotary Audio Knob (Clockwise to increase, Anti-clockwise to decrease) */}
+          <RotaryVolumeDial volume={volume} onVolumeChange={setVolume} size={88} />
 
-          {currentSong.isOnline && (
+          <View style={styles.bottomRow}>
             <TouchableOpacity
-              onPress={async () => {
-                if (isDownloading || isDownloaded) return;
-                setIsDownloading(true);
-                try {
-                  await downloadSongForOffline(currentSong);
-                  setIsDownloaded(true);
-                } catch (e) {
-                  Alert.alert('Download Error', 'Could not download track. Please try again.');
-                } finally {
-                  setIsDownloading(false);
-                }
-              }}
-              style={[styles.pill, isDownloaded && { borderColor: colors.teal }]}
-              disabled={isDownloading || isDownloaded}
+              onPress={onFavorite}
+              style={[
+                styles.pill,
+                st.favorite && { borderColor: colors.rose, backgroundColor: 'rgba(255,111,145,0.16)' },
+              ]}
+              activeOpacity={0.75}
             >
-              {isDownloading ? (
-                <ActivityIndicator size="small" color={colors.teal} />
-              ) : (
-                <Ionicons
-                  name={isDownloaded ? 'checkmark-circle' : 'cloud-download-outline'}
-                  size={18}
-                  color={isDownloaded ? colors.teal : colors.copper}
-                />
-              )}
-              <Text style={{ color: isDownloaded ? colors.teal : colors.text, fontSize: 13, fontWeight: '600' }}>
-                {isDownloaded ? 'Saved' : isDownloading ? 'Saving…' : 'Save Offline'}
+              <Ionicons
+                name={st.favorite ? 'heart' : 'heart-outline'}
+                size={18}
+                color={st.favorite ? colors.rose : colors.text}
+              />
+              <Text style={{ color: st.favorite ? colors.rose : colors.text, fontSize: 13, fontWeight: '700' }}>
+                {st.favorite ? 'Favorited' : 'Favorite'}
               </Text>
             </TouchableOpacity>
-          )}
 
-          <TouchableOpacity onPress={() => setPlaylistOpen(true)} style={styles.pill}>
-            <Ionicons name="add-circle-outline" size={18} color={colors.text} />
-            <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>Add to playlist</Text>
-          </TouchableOpacity>
-        </View>
+            {currentSong.isOnline && (
+              <TouchableOpacity
+                onPress={async () => {
+                  if (isDownloading || isDownloaded) return;
+                  setIsDownloading(true);
+                  try {
+                    await downloadSongForOffline(currentSong);
+                    setIsDownloaded(true);
+                  } catch (e) {
+                    Alert.alert('Download Error', 'Could not download track. Please try again.');
+                  } finally {
+                    setIsDownloading(false);
+                  }
+                }}
+                style={[styles.pill, isDownloaded && { borderColor: colors.teal }]}
+                disabled={isDownloading || isDownloaded}
+              >
+                {isDownloading ? (
+                  <ActivityIndicator size="small" color={colors.teal} />
+                ) : (
+                  <Ionicons
+                    name={isDownloaded ? 'checkmark-circle' : 'cloud-download-outline'}
+                    size={18}
+                    color={isDownloaded ? colors.teal : colors.copper}
+                  />
+                )}
+                <Text style={{ color: isDownloaded ? colors.teal : colors.text, fontSize: 13, fontWeight: '600' }}>
+                  {isDownloaded ? 'Saved' : isDownloading ? 'Saving…' : 'Save Offline'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity onPress={() => setPlaylistOpen(true)} style={styles.pill}>
+              <Ionicons name="add-circle-outline" size={18} color={colors.text} />
+              <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>Add to playlist</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </View>
 
       <Sheet visible={queueOpen} title="Up next" onClose={() => setQueueOpen(false)}>
@@ -216,26 +235,42 @@ export default function NowPlayingScreen({ player, onClose }) {
       </Sheet>
 
       <Sheet visible={playlistOpen} title="Add to playlist" onClose={() => setPlaylistOpen(false)}>
-        <PlaylistPicker songId={currentSong.id} onChange={() => forceRerender((n) => n + 1)} />
+        <PlaylistPicker song={currentSong} songId={currentSong.id} onChange={() => forceRerender((n) => n + 1)} />
       </Sheet>
     </View>
   );
 }
 
-function PlaylistPicker({ songId, onChange }) {
+function PlaylistPicker({ song, songId, onChange }) {
   const [, force] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
   const playlists = getDB().playlists;
+  const targetSong = song || songId;
+  const targetId = song?.id || songId;
+
+  function handleCreate() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const pl = createPlaylist(trimmed);
+    toggleSongInPlaylist(pl.id, targetSong);
+    setName('');
+    setCreating(false);
+    force((n) => n + 1);
+    onChange();
+  }
+
   return (
     <View>
-      {playlists.length === 0 ? (
+      {playlists.length === 0 && !creating ? (
         <Text style={styles.emptyTxt}>No playlists yet — create your first one below.</Text>
       ) : playlists.map((p) => {
-        const has = p.songIds.includes(songId);
+        const has = p.songIds.includes(targetId);
         return (
           <TouchableOpacity
             key={p.id}
             style={styles.plCard}
-            onPress={() => { toggleSongInPlaylist(p.id, songId); force((n) => n + 1); onChange(); }}
+            onPress={() => { toggleSongInPlaylist(p.id, targetSong); force((n) => n + 1); onChange(); }}
           >
             <View style={styles.plCover}>
               <Ionicons name="musical-notes" size={20} color="#1a0f08" />
@@ -252,16 +287,35 @@ function PlaylistPicker({ songId, onChange }) {
           </TouchableOpacity>
         );
       })}
-      <TouchableOpacity
-        style={styles.newPlBtn}
-        onPress={() => {
-          createPlaylist('New playlist ' + (playlists.length + 1));
-          force((n) => n + 1);
-          onChange();
-        }}
-      >
-        <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13.5 }}>+ New playlist</Text>
-      </TouchableOpacity>
+
+      {creating ? (
+        <View style={styles.inlineCreateBox}>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Playlist name…"
+            placeholderTextColor={colors.textFaint}
+            style={styles.inlineCreateInput}
+            autoFocus
+          />
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity onPress={() => { setCreating(false); setName(''); }} style={styles.inlineCancelBtn}>
+              <Text style={{ color: colors.textDim, fontWeight: '600', fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleCreate} style={styles.inlineSaveBtn}>
+              <Text style={{ color: '#161213', fontWeight: '700', fontSize: 13 }}>Create</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={styles.newPlBtn}
+          onPress={() => setCreating(true)}
+        >
+          <Ionicons name="add-circle" size={18} color={colors.copper} style={{ marginRight: 6 }} />
+          <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13.5 }}>+ New Playlist</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -282,11 +336,12 @@ const styles = StyleSheet.create({
   timesRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2, marginBottom: 14 },
   timeTxt: { color: colors.textFaint, fontSize: 11, fontVariant: ['tabular-nums'] },
   controlsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 },
+  volumeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6, marginTop: 14 },
   sideBtn: { padding: 8 },
   mainCtrls: { flexDirection: 'row', alignItems: 'center', gap: 24 },
   mainBtn: { padding: 6 },
   playBtn: { width: 66, height: 66, borderRadius: 33, backgroundColor: colors.text, alignItems: 'center', justifyContent: 'center', elevation: 6 },
-  bottomRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 22, gap: 10 },
+  bottomRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 18, gap: 10 },
   pill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: colors.line, paddingVertical: 11, borderRadius: 100 },
   queueRow: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 9 },
   queueNum: { color: colors.textFaint, fontSize: 11, width: 16 },
@@ -297,8 +352,11 @@ const styles = StyleSheet.create({
   queueHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: colors.line },
   queueCountTxt: { color: colors.textDim, fontSize: 12, fontWeight: '600' },
   clearBtn: { paddingVertical: 4, paddingHorizontal: 8, backgroundColor: 'rgba(255,111,145,0.12)', borderRadius: 6 },
-  clearBtnTxt: { color: colors.rose, fontSize: 11, fontWeight: '700' },
   plCard: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: colors.bgElevated, borderWidth: 1, borderColor: colors.line, borderRadius: 14, padding: 12, marginBottom: 8 },
   plCover: { width: 44, height: 44, borderRadius: 10, backgroundColor: colors.teal, alignItems: 'center', justifyContent: 'center' },
-  newPlBtn: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgElevated, borderWidth: 1, borderColor: colors.line, borderRadius: 100, paddingVertical: 12, marginTop: 4 },
+  newPlBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgElevated, borderWidth: 1, borderColor: colors.line, borderRadius: 100, paddingVertical: 12, marginTop: 4 },
+  inlineCreateBox: { backgroundColor: colors.bgElevated, borderWidth: 1, borderColor: colors.copper, borderRadius: 14, padding: 12, marginTop: 6, marginBottom: 8 },
+  inlineCreateInput: { backgroundColor: colors.bgElevated2, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, color: colors.text, fontSize: 14, marginBottom: 10 },
+  inlineCancelBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 8, backgroundColor: colors.bgElevated2 },
+  inlineSaveBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 8, backgroundColor: colors.copper },
 });

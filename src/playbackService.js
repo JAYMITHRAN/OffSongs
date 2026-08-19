@@ -10,6 +10,13 @@ module.exports = async function () {
   TrackPlayer.addEventListener(Event.RemotePrevious, () => global.offsongsOnRemotePrev && global.offsongsOnRemotePrev());
   TrackPlayer.addEventListener(Event.RemoteSeek, (e) => TrackPlayer.seekTo(e.position));
 
+  // Automatic Play Next when track ends in background / lockscreen
+  TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
+    if (global.offsongsOnPlaybackQueueEnded) {
+      global.offsongsOnPlaybackQueueEnded();
+    }
+  });
+
   // Auto-Pause when headphones are unplugged / Bluetooth disconnects (AUDIO_BECOMING_NOISY)
   TrackPlayer.addEventListener(Event.RemoteDuck, async ({ paused, permanent, ducking }) => {
     if (permanent || paused) {
