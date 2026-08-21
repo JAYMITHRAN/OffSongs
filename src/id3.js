@@ -1,4 +1,5 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Buffer } from 'buffer';
 
 // Fast, low-memory ID3v2.3 / v2.4 tag reader.
 // Reads only the first 128 KB of the audio file via ranged read,

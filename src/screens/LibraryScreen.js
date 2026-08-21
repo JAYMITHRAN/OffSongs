@@ -456,31 +456,17 @@ export default function LibraryScreen({
             </View>
           )}
 
-          {/* Hero Action Bar: Play All & Shuffle & Add Songs (if in Playlist) */}
-          {(tab === 'songs' || tab === 'favorites' || groupFilter) && (
+          {/* Hero Action Bar: Play All & Shuffle */}
+          {(tab === 'songs' || tab === 'favorites' || groupFilter) && filtered.length > 0 && (
             <View style={styles.heroActionsRow}>
-              {filtered.length > 0 && (
-                <>
-                  <TouchableOpacity style={styles.playAllBtn} onPress={() => handlePlayAll(filtered)} activeOpacity={0.85}>
-                    <Ionicons name="play" size={17} color="#161213" />
-                    <Text style={styles.playAllTxt}>Play All</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.shuffleBtn} onPress={() => handleShuffleAll(filtered)} activeOpacity={0.85}>
-                    <Ionicons name="shuffle" size={18} color={colors.text} />
-                    <Text style={styles.shuffleTxt}>Shuffle</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-              {groupFilter && groupFilter.playlistId && (
-                <TouchableOpacity
-                  style={[styles.shuffleBtn, { backgroundColor: 'rgba(232,147,92,0.14)', borderColor: colors.copper }]}
-                  onPress={() => setAddSongsToPlModal(true)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="add-circle" size={18} color={colors.copper} />
-                  <Text style={[styles.shuffleTxt, { color: colors.copper, fontWeight: '700' }]}>+ Add Songs</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity style={styles.playAllBtn} onPress={() => handlePlayAll(filtered)} activeOpacity={0.85}>
+                <Ionicons name="play" size={17} color="#161213" />
+                <Text style={styles.playAllTxt}>Play All</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.shuffleBtn} onPress={() => handleShuffleAll(filtered)} activeOpacity={0.85}>
+                <Ionicons name="shuffle" size={18} color={colors.text} />
+                <Text style={styles.shuffleTxt}>Shuffle</Text>
+              </TouchableOpacity>
             </View>
           )}
 

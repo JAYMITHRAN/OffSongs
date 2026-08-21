@@ -142,6 +142,7 @@ export default function NowPlayingScreen({ player, onClose }) {
           <RotaryVolumeDial volume={volume} onVolumeChange={setVolume} size={88} />
 
           <View style={styles.bottomRow}>
+            {/* 1. Favorite Pill */}
             <TouchableOpacity
               onPress={onFavorite}
               style={[
@@ -152,15 +153,16 @@ export default function NowPlayingScreen({ player, onClose }) {
             >
               <Ionicons
                 name={st.favorite ? 'heart' : 'heart-outline'}
-                size={18}
+                size={17}
                 color={st.favorite ? colors.rose : colors.text}
               />
-              <Text style={{ color: st.favorite ? colors.rose : colors.text, fontSize: 13, fontWeight: '700' }}>
+              <Text numberOfLines={1} style={{ color: st.favorite ? colors.rose : colors.text, fontSize: 12.5, fontWeight: '700' }}>
                 {st.favorite ? 'Favorited' : 'Favorite'}
               </Text>
             </TouchableOpacity>
 
-            {currentSong.isOnline && (
+            {/* 2. Save Offline Pill */}
+            {currentSong.isOnline ? (
               <TouchableOpacity
                 onPress={async () => {
                   if (isDownloading || isDownloaded) return;
@@ -168,33 +170,41 @@ export default function NowPlayingScreen({ player, onClose }) {
                   try {
                     await downloadSongForOffline(currentSong);
                     setIsDownloaded(true);
+                    Alert.alert('Saved Offline', `"${currentSong.title}" is saved for offline play.`);
                   } catch (e) {
-                    Alert.alert('Download Error', 'Could not download track. Please try again.');
+                    Alert.alert('Download Error', (e && e.message) ? e.message : 'Could not download track.');
                   } finally {
                     setIsDownloading(false);
                   }
                 }}
-                style={[styles.pill, isDownloaded && { borderColor: colors.teal }]}
+                style={[styles.pill, isDownloaded && { borderColor: colors.teal, backgroundColor: 'rgba(79,200,184,0.14)' }]}
                 disabled={isDownloading || isDownloaded}
+                activeOpacity={0.75}
               >
                 {isDownloading ? (
                   <ActivityIndicator size="small" color={colors.teal} />
                 ) : (
                   <Ionicons
                     name={isDownloaded ? 'checkmark-circle' : 'cloud-download-outline'}
-                    size={18}
+                    size={17}
                     color={isDownloaded ? colors.teal : colors.copper}
                   />
                 )}
-                <Text style={{ color: isDownloaded ? colors.teal : colors.text, fontSize: 13, fontWeight: '600' }}>
-                  {isDownloaded ? 'Saved' : isDownloading ? 'Saving…' : 'Save Offline'}
+                <Text numberOfLines={1} style={{ color: isDownloaded ? colors.teal : colors.text, fontSize: 12.5, fontWeight: '700' }}>
+                  {isDownloaded ? 'Saved' : isDownloading ? 'Saving…' : 'Save'}
                 </Text>
               </TouchableOpacity>
+            ) : (
+              <View style={[styles.pill, { borderColor: colors.teal, backgroundColor: 'rgba(79,200,184,0.12)' }]}>
+                <Ionicons name="checkmark-circle" size={17} color={colors.teal} />
+                <Text numberOfLines={1} style={{ color: colors.teal, fontSize: 12.5, fontWeight: '700' }}>Offline</Text>
+              </View>
             )}
 
-            <TouchableOpacity onPress={() => setPlaylistOpen(true)} style={styles.pill}>
-              <Ionicons name="add-circle-outline" size={18} color={colors.text} />
-              <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>Add to playlist</Text>
+            {/* 3. Add to Playlist Pill */}
+            <TouchableOpacity onPress={() => setPlaylistOpen(true)} style={styles.pill} activeOpacity={0.75}>
+              <Ionicons name="add-circle-outline" size={17} color={colors.text} />
+              <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12.5, fontWeight: '700' }}>Playlist</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
